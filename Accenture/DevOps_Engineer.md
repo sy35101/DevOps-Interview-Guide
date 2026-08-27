@@ -13,3 +13,8 @@
 - If the frontend, backend, and database are all deployed in private subnets, how can an end user access the application?
 - If secrets are created in AWS Secrets Manager, how can Amazon EKS access those secrets?
 - How do you set up RBAC in Amazon EKS?
+
+
+--------------------------------------
+
+
