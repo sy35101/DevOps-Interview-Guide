@@ -1420,3 +1420,145 @@ class EC2LogManager:
             Subject=subject,
             Message=message
         )
+
+
+1. NAT Gateway in Private Subnet
+
+Technically possible but NOT recommended and defeats the purpose:
+
+A NAT Gateway should be placed in a public subnet because:
+
+· Private subnets don't have direct internet access
+· NAT Gateway needs internet connectivity to forward traffic
+· It requires a route to Internet Gateway (IGW)
+
+Incorrect setup (NAT in private subnet):
+
+```
+Private Subnet → NAT Gateway → ??? (no route to internet)
+```
+
+Correct setup:
+
+```
+Private Subnet → NAT Gateway (in Public Subnet) → Internet Gateway → Internet
+```
+
+2. Cluster Auto-scaling Configuration
+
+For Kubernetes (EKS/GKE/AKS):
+
+Step 1: Install Cluster Autoscaler
+
+For AWS EKS:
+
+```bash
+# Download the Cluster Autoscaler manifest
+curl -O https://raw.githubusercontent.com/kubernetes/autoscaler/master/cluster-autoscaler/cloudprovider/aws/examples/cluster-autoscaler-autodiscover.yaml
+
+# Edit the manifest and set your cluster name
+sed -i 's/<YOUR CLUSTER NAME>/my-cluster-name/g' cluster-autoscaler-autodiscover.yaml
+
+# Apply the manifest
+kubectl apply -f cluster-autoscaler-autodiscover.yaml
+```
+
+Step 2: Configure IAM Policy (EKS example)
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "autoscaling:DescribeAutoScalingGroups",
+                "autoscaling:DescribeAutoScalingInstances",
+                "autoscaling:DescribeLaunchConfigurations",
+                "autoscaling:DescribeTags",
+                "autoscaling:SetDesiredCapacity",
+                "autoscaling:TerminateInstanceInAutoScalingGroup",
+                "ec2:DescribeLaunchTemplateVersions"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+Step 3: Tag Auto Scaling Groups
+
+Add these tags to your Auto Scaling Groups:
+
+```bash
+k8s.io/cluster-autoscaler/enabled: true
+k8s.io/cluster-autoscaler/my-cluster-name: owned
+```
+
+Step 4: Create Autoscaling Policies
+
+Example HPA (Horizontal Pod Autoscaler):
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-app-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+For AWS ECS:
+
+```bash
+# Create Auto Scaling policy
+aws application-autoscaling register-scalable-target \
+    --service-namespace ecs \
+    --scalable-dimension ecs:service:DesiredCount \
+    --resource-id service/my-cluster/my-service \
+    --min-capacity 2 \
+    --max-capacity 10
+
+# Create scaling policy
+aws application-autoscaling put-scaling-policy \
+    --service-namespace ecs \
+    --scalable-dimension ecs:service:DesiredCount \
+    --resource-id service/my-cluster/my-service \
+    --policy-name cpu-scaling \
+    --policy-type TargetTrackingScaling \
+    --target-tracking-scaling-policy-configuration '{
+        "TargetValue": 70.0,
+        "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+        },
+        "ScaleOutCooldown": 60,
+        "ScaleInCooldown": 300
+    }'
+```
+
+Best Practices for Auto-scaling:
+
+1. Set appropriate min/max limits
+2. Use multiple metrics (CPU, memory, custom metrics)
+3. Configure cooldown periods to prevent flapping
+4. Test scaling scenarios
+5. Monitor scaling events
+6. Use node pool taints/tolerations for specialized workloads
